@@ -31,7 +31,6 @@ type Client struct {
 
 func NewClient(tgToken string) *Client {
 	b, uc := initClient(tgToken)
-
 	return &Client{bot: b, updateConfig: uc}
 }
 
@@ -62,20 +61,37 @@ func (c *Client) Start(db *sql.DB) {
 }
 
 func (c *Client) handleMessage(message *tgbotapi.Message) {
-	if userStates[message.Chat.ID] == nil {
-		userStates[message.Chat.ID] = &UserState{}
-		c.showMainMenu(message.Chat.ID)
+	fmt.Println("ID:", message.Chat.ID)
+
+	if c.isAdmins(message.Chat.ID) {
+		// c.sendMsg(message.Chat.ID, "Панель администратора")
+		if userStates[message.Chat.ID] == nil {
+			userStates[message.Chat.ID] = &UserState{}
+			c.adminShowMainMenu(message.Chat.ID)
+		}
+		c.handleAdditions(message.Chat.ID, message.Text)
+	} else {
+		// c.sendMsg(message.Chat.ID, "Пользовательская панель")
+		c.userShowMainMenu(message.Chat.ID)
 	}
-	c.handleAdditions(message.Chat.ID, message.Text)
+
 }
 
-func (c *Client) showMainMenu(chatID int64) {
+func (c *Client) userShowMainMenu(chatID int64) {
+	inlineKeyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("Посмотреть все", "view_all"),
+		),
+	)
+	msg := tgbotapi.NewMessage(chatID, "Что вы хотите сделать?")
+	msg.ReplyMarkup = inlineKeyboard
+	c.sendMsgKB(msg)
+}
+
+func (c *Client) adminShowMainMenu(chatID int64) {
 	inlineKeyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("Добавить", "add"),
-			// tgbotapi.NewInlineKeyboardButtonData("Редактировать", "edit"),
-			// tgbotapi.NewInlineKeyboardButtonData("Удалить", "delete"),
-			// tgbotapi.NewInlineKeyboardButtonData("Просмотр", "view"),
 			tgbotapi.NewInlineKeyboardButtonData("Посмотреть все", "view_all"),
 		),
 	)
@@ -131,12 +147,11 @@ func (c *Client) handleCallback(callback *tgbotapi.CallbackQuery, db *sql.DB) {
 
 	switch state.Action {
 	case "":
-		// c.showMainMenu(userID)
-		fmt.Println("show action:", state.Action)
+		return
 	case "waiting_for_product":
 		c.sendMsg(userID, "Введите наименование:")
 	default:
-		c.showMainMenu(userID)
+		c.adminShowMainMenu(userID)
 	}
 }
 
@@ -207,10 +222,13 @@ func (c *Client) getAllProducts(db *sql.DB) (string, error) {
 		var name, description string
 		var price float64
 		var count int
-		if err := rows.Scan(&name, &description, &price); err != nil {
+		if err := rows.Scan(&name, &description, &count, &price); err != nil {
 			return "", err
 		}
-		result.WriteString(fmt.Sprintf("Название: %s, Описание: %s, Кол-во: %d, Стоимость: %.2f\n", name, description, count, price))
+		_, err := result.WriteString(fmt.Sprintf("Название: %s\nОписание: %s\nКол-во: %d\nСтоимость: %.2f\n\n", name, description, count, price))
+		if err != nil {
+			return "", err
+		}
 	}
 	if result.Len() == 0 {
 		return "Нет позиций в базе данных.", nil
@@ -230,4 +248,18 @@ func (c *Client) sendMsgKB(msg tgbotapi.MessageConfig) {
 	if err != nil {
 		fmt.Println(err)
 	}
+}
+
+func (c *Client) isAdmins(userID int64) bool {
+	admins := make([]int64, 0)
+	admins = append(admins, 329159577)
+	admins = append(admins, 1188924200)
+
+	for _, admin := range admins {
+		if userID == admin {
+			return true
+		}
+	}
+
+	return false
 }
